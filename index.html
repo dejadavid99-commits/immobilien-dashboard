@@ -48,6 +48,9 @@
   .forecastbox .f .label{color:var(--muted);font-size:0.75rem;}
   .forecastbox .f .value{font-size:1.15rem;font-weight:700;margin-top:2px;}
   footer{color:var(--muted);font-size:0.75rem;text-align:center;margin-top:30px;}
+  .tabs{display:flex;gap:8px;overflow-x:auto;margin-bottom:18px;padding-bottom:4px;}
+  .tab{flex:0 0 auto;background:var(--panel);border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:20px;font-size:0.85rem;cursor:pointer;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;}
+  .tab.active{background:var(--accent);color:#06240f;border-color:var(--accent);font-weight:600;}
 </style>
 </head>
 <body>
@@ -71,6 +74,8 @@
     <button class="logout" id="logoutBtn">Abmelden</button>
   </header>
 
+  <div class="tabs" id="tabs"></div>
+  <div id="overview"></div>
   <div id="properties"></div>
 
   <footer>Alle Berechnungen basieren auf den hinterlegten Darlehensverträgen und Annahmen zur Wertentwicklung. Keine Anlageberatung.</footer>
@@ -125,6 +130,41 @@ function buildTimeline(property, today){
   const mToday = todayAbs - startAbs; // can be negative if before start
 
   return {series, start, end, startAbs, endAbs, N, mToday, loanSeries};
+}
+
+// Restschuld/Wert/Netto eines Objekts zu einem beliebigen absoluten Monat (vor Start = volle Finanzierung,
+// nach Zinsbindungsende = letzter bekannter Stand wird fortgeschrieben)
+function getStateAt(property, tl, absMonth){
+  if(absMonth < tl.startAbs){
+    const restschuld = property.loans.reduce((s,l)=>s+l.principal,0);
+    const wert = property.purchasePrice;
+    return {restschuld, wert, netto: wert-restschuld};
+  }
+  const idx = Math.min(Math.max(absMonth - tl.startAbs, 0), tl.N);
+  const s = tl.series[idx];
+  return {restschuld: s.restschuld, wert: s.wert, netto: s.netto};
+}
+
+// Summiert die Zeitreihen aller Objekte auf eine gemeinsame, kalendarisch ausgerichtete Zeitachse
+function buildAggregateSeries(timelines, today){
+  const globalStartAbs = Math.min(...timelines.map(t=>t.tl.startAbs));
+  const globalEndAbs = Math.max(...timelines.map(t=>t.tl.endAbs));
+  const N = globalEndAbs - globalStartAbs;
+  const series = [];
+  for(let m=0;m<=N;m++){
+    const abs = globalStartAbs+m;
+    let restschuld=0, wert=0;
+    timelines.forEach(({property,tl})=>{
+      const st = getStateAt(property, tl, abs);
+      restschuld += st.restschuld;
+      wert += st.wert;
+    });
+    const y = Math.floor(abs/12), mo = ((abs%12)+12)%12;
+    series.push({m, y, mo, restschuld, wert, netto: wert-restschuld});
+  }
+  const todayAbs = monthIndexAbs(today.y, today.m);
+  const mToday = todayAbs - globalStartAbs;
+  return {series, mToday, globalStartAbs, globalEndAbs, N};
 }
 
 function renderChart(canvas, series, mToday, appreciationOverrideWert){
@@ -224,17 +264,15 @@ function renderProperty(property, container, today){
   const notStartedYet = dateLess(today, tl.start);
 
   // current state
-  let curRestschuld, curWert, curNetto, curTilgungMonat, curZinsMonat;
+  const curState = getStateAt(property, tl, monthIndexAbs(today.y, today.m));
+  const curRestschuld = curState.restschuld, curWert = curState.wert, curNetto = curState.netto;
+  let curTilgungMonat, curZinsMonat;
   if(notStartedYet){
-    curRestschuld = property.loans.reduce((s,l)=>s+l.principal,0);
-    curWert = property.purchasePrice;
-    curNetto = curWert - curRestschuld;
     curTilgungMonat = 0;
     curZinsMonat = property.loans.reduce((s,l)=>s+l.principal*l.interestRatePctPerYear/1200,0);
   } else {
     const idx = Math.min(mToday, N);
     const s = series[idx];
-    curRestschuld = s.restschuld; curWert = s.wert; curNetto = s.netto;
     curTilgungMonat = s.tilgungMonat; curZinsMonat = s.zinsMonat;
   }
 
@@ -252,11 +290,11 @@ function renderProperty(property, container, today){
       <div class="hint">${property.address} · ${notStartedYet ? `Tilgungsbeginn in ${daysUntil(today, tl.start)} Tagen (${String(tl.start.d).padStart(2,'0')}.${String(tl.start.m+1).padStart(2,'0')}.${tl.start.y})` : `Zinsbindung bis ${String(tl.end.d).padStart(2,'0')}.${String(tl.end.m+1).padStart(2,'0')}.${tl.end.y}`}</div>
 
       <div class="kpis">
-        <div class="kpi"><div class="label">Restschuld heute</div><div class="value">${EUR(curRestschuld)}</div></div>
-        <div class="kpi"><div class="label">Geschätzter Wert heute</div><div class="value">${EUR(curWert)}</div></div>
         <div class="kpi"><div class="label">Netto-Immobilienvermögen</div><div class="value ${curNetto>=0?'pos':'neg'}">${EUR(curNetto)}</div></div>
         <div class="kpi"><div class="label">Tilgung/Monat (aktuell)</div><div class="value">${EUR2(curTilgungMonat)}</div></div>
         <div class="kpi"><div class="label">Cashflow/Monat</div><div class="value ${cashflowMonat>=0?'pos':'neg'}">${EUR2(cashflowMonat)}</div></div>
+        <div class="kpi"><div class="label">Geschätzter Wert heute</div><div class="value">${EUR(curWert)}</div></div>
+        <div class="kpi"><div class="label">Restschuld heute</div><div class="value">${EUR(curRestschuld)}</div></div>
       </div>
 
       <h2>Prognose zum Ende der Zinsbindung (${tl.end.y})</h2>
@@ -323,13 +361,112 @@ function renderProperty(property, container, today){
   window.addEventListener('resize', () => renderChart(canvas, series, mToday));
 }
 
+function renderOverview(data, timelines, container, today){
+  const todayAbs = monthIndexAbs(today.y, today.m);
+  let totalRestschuld=0, totalWert=0, totalTilgung=0, totalCashflow=0;
+  const rows = timelines.map(({property, tl}) => {
+    const st = getStateAt(property, tl, todayAbs);
+    const r = property.rental;
+    const bankrateMonat = property.loans.reduce((s,l)=>s+l.monthlyPayment,0);
+    const cashflowMonat = r.kaltmiete - r.hausverwaltung - r.mietverwaltung - r.ruecklage - r.sonstigeKosten - bankrateMonat + r.geschaetzteSteuerersparnisMonatlich;
+    const notStartedYet = dateLess(today, tl.start);
+    const tilgungMonat = notStartedYet ? 0 : tl.series[Math.min(tl.mToday, tl.N)].tilgungMonat;
+    totalRestschuld += st.restschuld;
+    totalWert += st.wert;
+    totalTilgung += tilgungMonat;
+    totalCashflow += cashflowMonat;
+    return {property, restschuld: st.restschuld, wert: st.wert, netto: st.netto, cashflowMonat};
+  });
+  const totalNetto = totalWert - totalRestschuld;
+  const agg = buildAggregateSeries(timelines, today);
+
+  const el = document.createElement('div');
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Gesamtübersicht</h2>
+      <div class="hint">Summe über ${data.properties.length} ${data.properties.length===1?'Objekt':'Objekte'}</div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="label">Netto-Vermögen gesamt</div><div class="value ${totalNetto>=0?'pos':'neg'}">${EUR(totalNetto)}</div></div>
+        <div class="kpi"><div class="label">Tilgung/Monat gesamt</div><div class="value">${EUR2(totalTilgung)}</div></div>
+        <div class="kpi"><div class="label">Cashflow/Monat gesamt</div><div class="value ${totalCashflow>=0?'pos':'neg'}">${EUR2(totalCashflow)}</div></div>
+        <div class="kpi"><div class="label">Immobilienwert gesamt</div><div class="value">${EUR(totalWert)}</div></div>
+        <div class="kpi"><div class="label">Restschuld gesamt</div><div class="value">${EUR(totalRestschuld)}</div></div>
+      </div>
+
+      <div style="margin-top:18px;">
+        <h2 style="margin-bottom:0;">Verlauf (alle Objekte summiert)</h2>
+        <div class="hint">Rot = Restschuld, Blau = Immobilienwert, Grün = Netto-Vermögen · nach Ablauf der jeweiligen Zinsbindung wird der letzte bekannte Wert je Objekt fortgeschrieben</div>
+        <canvas id="chart-overview"></canvas>
+      </div>
+
+      <h2 style="margin-top:18px;">Objekte im Überblick</h2>
+      <table>
+        <thead><tr><th>Objekt</th><th class="num">Netto-Vermögen</th><th class="num">Cashflow/Monat</th><th class="num">Wert</th><th class="num">Restschuld</th></tr></thead>
+        <tbody>
+          ${rows.map(row=>`<tr><td>${row.property.name}</td><td class="num">${EUR(row.netto)}</td><td class="num">${EUR2(row.cashflowMonat)}</td><td class="num">${EUR(row.wert)}</td><td class="num">${EUR(row.restschuld)}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  container.appendChild(el);
+  const canvas = el.querySelector('#chart-overview');
+  renderChart(canvas, agg.series, agg.mToday);
+  window.addEventListener('resize', () => renderChart(canvas, agg.series, agg.mToday));
+}
+
 function renderAll(data){
   document.getElementById('lastUpdated').textContent = 'Stand der Daten: ' + data.meta.lastUpdated.split('-').reverse().join('.');
   const now = new Date();
   const today = {y: now.getFullYear(), m: now.getMonth(), d: now.getDate()};
-  const container = document.getElementById('properties');
-  container.innerHTML = '';
-  data.properties.forEach(p => renderProperty(p, container, today));
+
+  const timelines = data.properties.map(property => ({property, tl: buildTimeline(property, today)}));
+
+  const tabsEl = document.getElementById('tabs');
+  const overviewEl = document.getElementById('overview');
+  const propsEl = document.getElementById('properties');
+  tabsEl.innerHTML = '';
+  overviewEl.innerHTML = '';
+  propsEl.innerHTML = '';
+
+  renderOverview(data, timelines, overviewEl, today);
+
+  const propContainers = {};
+  timelines.forEach(({property}) => {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'none';
+    propsEl.appendChild(wrap);
+    propContainers[property.id] = wrap;
+  });
+  timelines.forEach(({property}) => renderProperty(property, propContainers[property.id], today));
+
+  function setActive(tabId){
+    overviewEl.style.display = tabId==='overview' ? 'block' : 'none';
+    Object.entries(propContainers).forEach(([id, elw]) => {
+      elw.style.display = (id===tabId) ? 'block' : 'none';
+    });
+    tabsEl.querySelectorAll('.tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab===tabId);
+    });
+  }
+
+  const overviewTab = document.createElement('button');
+  overviewTab.className = 'tab active';
+  overviewTab.dataset.tab = 'overview';
+  overviewTab.textContent = '📊 Gesamtübersicht';
+  overviewTab.addEventListener('click', () => setActive('overview'));
+  tabsEl.appendChild(overviewTab);
+
+  data.properties.forEach(property => {
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.tab = property.id;
+    btn.textContent = property.name;
+    btn.addEventListener('click', () => setActive(property.id));
+    tabsEl.appendChild(btn);
+  });
+
+  setActive('overview');
 }
 
 // ---- Crypto / unlock flow ----
