@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vermögensaufbau Immobilien</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2129; --panel2:#212b35; --text:#eef2f6; --muted:#8b98a5;
+    --accent:#3fb950; --accent2:#58a6ff; --warn:#f0883e; --danger:#f85149; --border:#2d3640;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .lockbox{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:32px;max-width:360px;width:100%;}
+  .lockbox h1{font-size:1.2rem;margin:0 0 6px;}
+  .lockbox p{color:var(--muted);font-size:0.9rem;margin:0 0 20px;}
+  .lockbox input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;}
+  .lockbox button{width:100%;margin-top:12px;padding:12px;border:none;border-radius:8px;background:var(--accent);color:#06240f;font-weight:600;font-size:1rem;cursor:pointer;}
+  .lockbox button:active{opacity:0.85;}
+  .err{color:var(--danger);font-size:0.85rem;margin-top:10px;min-height:1.2em;}
+  #app{display:none;max-width:1000px;margin:0 auto;padding:16px 16px 60px;}
+  header.top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:18px;}
+  header.top h1{font-size:1.3rem;margin:0;}
+  header.top .sub{color:var(--muted);font-size:0.85rem;}
+  .logout{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;font-size:0.8rem;cursor:pointer;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px;}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .kpi .label{color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.03em;}
+  .kpi .value{font-size:1.3rem;font-weight:700;margin-top:4px;}
+  .kpi .value.pos{color:var(--accent);}
+  .kpi .value.neg{color:var(--danger);}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px;}
+  .panel h2{font-size:1rem;margin:0 0 4px;}
+  .panel .hint{color:var(--muted);font-size:0.8rem;margin-bottom:12px;}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:0.8rem;color:var(--muted);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+  canvas{width:100%;height:280px;display:block;}
+  .slider-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:0.85rem;}
+  .slider-row input[type=range]{flex:1;}
+  table{width:100%;border-collapse:collapse;font-size:0.85rem;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:500;font-size:0.75rem;text-transform:uppercase;}
+  td.num,th.num{text-align:right;}
+  .forecastbox{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;}
+  .forecastbox .f{background:var(--panel2);border-radius:8px;padding:12px;}
+  .forecastbox .f .label{color:var(--muted);font-size:0.75rem;}
+  .forecastbox .f .value{font-size:1.15rem;font-weight:700;margin-top:2px;}
+  footer{color:var(--muted);font-size:0.75rem;text-align:center;margin-top:30px;}
+</style>
+</head>
+<body>
+
+<div id="lock">
+  <div class="lockbox">
+    <h1>🔒 Vermögensaufbau Immobilien</h1>
+    <p>Bitte Passwort eingeben, um die Daten zu entschlüsseln.</p>
+    <input type="password" id="pw" placeholder="Passwort" autofocus>
+    <button id="unlockBtn">Entsperren</button>
+    <div class="err" id="err"></div>
+  </div>
+</div>
+
+<div id="app">
+  <header class="top">
+    <div>
+      <h1>Vermögensaufbau Immobilien</h1>
+      <div class="sub" id="lastUpdated"></div>
+    </div>
+    <button class="logout" id="logoutBtn">Abmelden</button>
+  </header>
+
+  <div id="properties"></div>
+
+  <footer>Alle Berechnungen basieren auf den hinterlegten Darlehensverträgen und Annahmen zur Wertentwicklung. Keine Anlageberatung.</footer>
+</div>
+
+<script>
+const MONTH_NAMES = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+const EUR = (v) => v.toLocaleString('de-DE', {style:'currency', currency:'EUR', maximumFractionDigits:0});
+const EUR2 = (v) => v.toLocaleString('de-DE', {style:'currency', currency:'EUR', maximumFractionDigits:2});
+
+function parseISO(s){
+  const [y,m,d] = s.split('-').map(Number);
+  return {y, m: m-1, d};
+}
+function monthIndexAbs(y,m){ return y*12+m; }
+
+function buildTimeline(property, today){
+  // Reference point = common firstPaymentDate of loans (assume identical across loans of a property for simplicity)
+  const start = parseISO(property.loans[0].firstPaymentDate);
+  const end = parseISO(property.loans[0].fixedUntil);
+  const startAbs = monthIndexAbs(start.y, start.m);
+  const endAbs = monthIndexAbs(end.y, end.m);
+  const N = endAbs - startAbs; // number of months in horizon, m=0..N
+
+  // Per-loan amortization schedule
+  const loanSeries = property.loans.map(loan => {
+    let balance = loan.principal;
+    const rows = [];
+    for(let m=0; m<=N; m++){
+      const interest = balance * loan.interestRatePctPerYear / 1200;
+      const princ = loan.monthlyPayment - interest;
+      balance = balance - princ;
+      rows.push({m, interest, princ, balance});
+    }
+    return {loan, rows};
+  });
+
+  const appreciationRate = property.appreciationRatePctPerYear;
+  const series = [];
+  for(let m=0; m<=N; m++){
+    const restschuld = loanSeries.reduce((s,ls)=>s+ls.rows[m].balance,0);
+    const tilgungMonat = loanSeries.reduce((s,ls)=>s+ls.rows[m].princ,0);
+    const zinsMonat = loanSeries.reduce((s,ls)=>s+ls.rows[m].interest,0);
+    const wert = property.purchasePrice * (1 + appreciationRate*m/1200);
+    const netto = wert - restschuld;
+    const abs = startAbs + m;
+    const y = Math.floor(abs/12), mo = ((abs%12)+12)%12;
+    series.push({m, y, mo, restschuld, tilgungMonat, zinsMonat, wert, netto});
+  }
+
+  const todayAbs = monthIndexAbs(today.y, today.m);
+  const mToday = todayAbs - startAbs; // can be negative if before start
+
+  return {series, start, end, startAbs, endAbs, N, mToday, loanSeries};
+}
+
+function renderChart(canvas, series, mToday, appreciationOverrideWert){
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const cssH = 280;
+  canvas.width = cssW*dpr; canvas.height = cssH*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,cssW,cssH);
+
+  const padL=56, padR=14, padT=14, padB=28;
+  const plotW = cssW-padL-padR, plotH = cssH-padT-padB;
+
+  const wertArr = appreciationOverrideWert || series.map(s=>s.wert);
+  const nettoArr = series.map((s,i)=> wertArr[i]-s.restschuld);
+
+  const allVals = series.map(s=>s.restschuld).concat(wertArr).concat(nettoArr);
+  let yMin = Math.min(...allVals, 0), yMax = Math.max(...allVals);
+  const pad = (yMax-yMin)*0.08 || 1000;
+  yMin -= pad; yMax += pad;
+
+  const xN = series.length-1;
+  const xToPx = (i) => padL + (i/xN)*plotW;
+  const yToPx = (v) => padT + plotH - ((v-yMin)/(yMax-yMin))*plotH;
+
+  // gridlines
+  ctx.strokeStyle = '#2d3640'; ctx.lineWidth=1; ctx.font='11px -apple-system,sans-serif'; ctx.fillStyle='#8b98a5';
+  const gridCount = 5;
+  for(let g=0; g<=gridCount; g++){
+    const v = yMin + (g/gridCount)*(yMax-yMin);
+    const py = yToPx(v);
+    ctx.beginPath(); ctx.moveTo(padL,py); ctx.lineTo(cssW-padR,py); ctx.stroke();
+    ctx.fillText(EUR(v).replace(/\s/g,' '), 2, py+4);
+  }
+  // zero line emphasis
+  if(yMin<0 && yMax>0){
+    ctx.strokeStyle='#52606d'; ctx.beginPath(); ctx.moveTo(padL,yToPx(0)); ctx.lineTo(cssW-padR,yToPx(0)); ctx.stroke();
+  }
+
+  // x labels (yearly, spaced to avoid overlap on narrow screens)
+  ctx.fillStyle='#8b98a5';
+  const pxPerMonth = plotW/xN;
+  const yearPx = pxPerMonth*12;
+  const minLabelPx = 36;
+  const yearStep = Math.max(1, Math.ceil(minLabelPx/yearPx));
+  let lastDrawnPx = -Infinity;
+  for(let i=0;i<=xN;i++){
+    const yearsSinceStart = Math.round(i/12);
+    const isCandidate = (series[i].mo===0 && yearsSinceStart % yearStep === 0) || i===0;
+    if(isCandidate){
+      const px = xToPx(i);
+      if(px-lastDrawnPx >= minLabelPx){
+        ctx.fillText(String(series[i].y), Math.max(padL, px-14), cssH-8);
+        lastDrawnPx = px;
+      }
+    }
+  }
+
+  function drawLine(getVal, color){
+    ctx.strokeStyle=color; ctx.lineWidth=2.2; ctx.beginPath();
+    series.forEach((s,i)=>{
+      const px=xToPx(i), py=yToPx(getVal(s,i));
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    });
+    ctx.stroke();
+  }
+  drawLine((s,i)=>s.restschuld, '#f85149');
+  drawLine((s,i)=>wertArr[i], '#58a6ff');
+  drawLine((s,i)=>nettoArr[i], '#3fb950');
+
+  // today marker
+  if(mToday>=0 && mToday<=xN){
+    const px = xToPx(mToday);
+    ctx.strokeStyle='#f0883e'; ctx.setLineDash([4,4]); ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(px,padT); ctx.lineTo(px,padT+plotH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#f0883e'; ctx.fillText('heute', px+4, padT+12);
+  }
+}
+
+function dateLess(a, b){
+  if(a.y!==b.y) return a.y<b.y;
+  if(a.m!==b.m) return a.m<b.m;
+  return a.d<b.d;
+}
+
+function daysUntil(a, b){
+  const msA = Date.UTC(a.y, a.m, a.d);
+  const msB = Date.UTC(b.y, b.m, b.d);
+  return Math.round((msB-msA)/86400000);
+}
+
+function renderProperty(property, container, today){
+  const tl = buildTimeline(property, today);
+  const {series, mToday, N} = tl;
+  const notStartedYet = dateLess(today, tl.start);
+
+  // current state
+  let curRestschuld, curWert, curNetto, curTilgungMonat, curZinsMonat;
+  if(notStartedYet){
+    curRestschuld = property.loans.reduce((s,l)=>s+l.principal,0);
+    curWert = property.purchasePrice;
+    curNetto = curWert - curRestschuld;
+    curTilgungMonat = 0;
+    curZinsMonat = property.loans.reduce((s,l)=>s+l.principal*l.interestRatePctPerYear/1200,0);
+  } else {
+    const idx = Math.min(mToday, N);
+    const s = series[idx];
+    curRestschuld = s.restschuld; curWert = s.wert; curNetto = s.netto;
+    curTilgungMonat = s.tilgungMonat; curZinsMonat = s.zinsMonat;
+  }
+
+  const last = series[series.length-1];
+  const totalFinanced = property.loans.reduce((s,l)=>s+l.principal,0);
+
+  const r = property.rental;
+  const bankrateMonat = property.loans.reduce((s,l)=>s+l.monthlyPayment,0);
+  const cashflowMonat = r.kaltmiete - r.hausverwaltung - r.mietverwaltung - r.ruecklage - r.sonstigeKosten - bankrateMonat + r.geschaetzteSteuerersparnisMonatlich;
+
+  const el = document.createElement('div');
+  el.innerHTML = `
+    <div class="panel">
+      <h2>${property.name}</h2>
+      <div class="hint">${property.address} · ${notStartedYet ? `Tilgungsbeginn in ${daysUntil(today, tl.start)} Tagen (${String(tl.start.d).padStart(2,'0')}.${String(tl.start.m+1).padStart(2,'0')}.${tl.start.y})` : `Zinsbindung bis ${String(tl.end.d).padStart(2,'0')}.${String(tl.end.m+1).padStart(2,'0')}.${tl.end.y}`}</div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="label">Restschuld heute</div><div class="value">${EUR(curRestschuld)}</div></div>
+        <div class="kpi"><div class="label">Geschätzter Wert heute</div><div class="value">${EUR(curWert)}</div></div>
+        <div class="kpi"><div class="label">Netto-Immobilienvermögen</div><div class="value ${curNetto>=0?'pos':'neg'}">${EUR(curNetto)}</div></div>
+        <div class="kpi"><div class="label">Tilgung/Monat (aktuell)</div><div class="value">${EUR2(curTilgungMonat)}</div></div>
+        <div class="kpi"><div class="label">Cashflow/Monat</div><div class="value ${cashflowMonat>=0?'pos':'neg'}">${EUR2(cashflowMonat)}</div></div>
+      </div>
+
+      <h2>Prognose zum Ende der Zinsbindung (${tl.end.y})</h2>
+      <div class="forecastbox">
+        <div class="f"><div class="label">Restschuld</div><div class="value">${EUR(last.restschuld)}</div></div>
+        <div class="f"><div class="label">Immobilienwert (${property.appreciationRatePctPerYear}% p.a.)</div><div class="value" id="fcWert-${property.id}">${EUR(last.wert)}</div></div>
+        <div class="f"><div class="label">Netto-Vermögen</div><div class="value pos" id="fcNetto-${property.id}">${EUR(last.netto)}</div></div>
+        <div class="f"><div class="label">Zuwachs seit Start</div><div class="value pos" id="fcZuwachs-${property.id}">${EUR(last.netto - (property.purchasePrice-totalFinanced))}</div></div>
+      </div>
+
+      <div style="margin-top:18px;">
+        <h2 style="margin-bottom:0;">Verlauf bis Zinsbindungsende</h2>
+        <div class="hint">Rot = Restschuld, Blau = Immobilienwert, Grün = Netto-Vermögen (Wert − Restschuld)</div>
+        <canvas id="chart-${property.id}"></canvas>
+        <div class="slider-row">
+          <label for="apr-${property.id}" style="color:#8b98a5;white-space:nowrap;">Wertsteigerung p.a.:</label>
+          <input type="range" id="apr-${property.id}" min="0" max="6" step="0.25" value="${property.appreciationRatePctPerYear}">
+          <span id="aprVal-${property.id}" style="min-width:42px;">${property.appreciationRatePctPerYear.toFixed(2)}%</span>
+        </div>
+      </div>
+
+      <h2 style="margin-top:18px;">Darlehen</h2>
+      <table>
+        <thead><tr><th>Darlehen</th><th class="num">Betrag</th><th class="num">Zins</th><th class="num">Rate/Monat</th><th>Zinsbindung bis</th></tr></thead>
+        <tbody>
+          ${property.loans.map(l=>`<tr><td>${l.label}</td><td class="num">${EUR(l.principal)}</td><td class="num">${l.interestRatePctPerYear.toFixed(3)}%</td><td class="num">${EUR2(l.monthlyPayment)}</td><td>${l.fixedUntil.split('-').reverse().join('.')}</td></tr>`).join('')}
+          <tr style="font-weight:600;"><td>Summe</td><td class="num">${EUR(totalFinanced)}</td><td class="num">—</td><td class="num">${EUR2(bankrateMonat)}</td><td>—</td></tr>
+        </tbody>
+      </table>
+
+      <h2 style="margin-top:18px;">Miete &amp; laufende Kosten (monatlich)</h2>
+      <table>
+        <tbody>
+          <tr><td>Kaltmiete</td><td class="num">${EUR2(r.kaltmiete)}</td></tr>
+          <tr><td>Hausverwaltung</td><td class="num">− ${EUR2(r.hausverwaltung)}</td></tr>
+          <tr><td>Mietverwaltung</td><td class="num">− ${EUR2(r.mietverwaltung)}</td></tr>
+          <tr><td>Instandhaltungsrücklage</td><td class="num">− ${EUR2(r.ruecklage)}</td></tr>
+          <tr><td>Zins + Tilgung (Bankrate)</td><td class="num">− ${EUR2(bankrateMonat)}</td></tr>
+          <tr><td>Geschätzte Steuerersparnis</td><td class="num">+ ${EUR2(r.geschaetzteSteuerersparnisMonatlich)}</td></tr>
+          <tr style="font-weight:600;"><td>Netto-Cashflow</td><td class="num">${EUR2(cashflowMonat)}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+  container.appendChild(el);
+
+  const canvas = el.querySelector(`#chart-${property.id}`);
+  renderChart(canvas, series, mToday);
+
+  const slider = el.querySelector(`#apr-${property.id}`);
+  const sliderVal = el.querySelector(`#aprVal-${property.id}`);
+  slider.addEventListener('input', () => {
+    const rate = parseFloat(slider.value);
+    sliderVal.textContent = rate.toFixed(2)+'%';
+    const wertArr = series.map(s => property.purchasePrice * (1 + rate*s.m/1200));
+    renderChart(canvas, series, mToday, wertArr);
+    const lastWert = wertArr[wertArr.length-1];
+    const lastNetto = lastWert - last.restschuld;
+    el.querySelector(`#fcWert-${property.id}`).textContent = EUR(lastWert);
+    el.querySelector(`#fcNetto-${property.id}`).textContent = EUR(lastNetto);
+    el.querySelector(`#fcZuwachs-${property.id}`).textContent = EUR(lastNetto - (property.purchasePrice-totalFinanced));
+  });
+
+  window.addEventListener('resize', () => renderChart(canvas, series, mToday));
+}
+
+function renderAll(data){
+  document.getElementById('lastUpdated').textContent = 'Stand der Daten: ' + data.meta.lastUpdated.split('-').reverse().join('.');
+  const now = new Date();
+  const today = {y: now.getFullYear(), m: now.getMonth(), d: now.getDate()};
+  const container = document.getElementById('properties');
+  container.innerHTML = '';
+  data.properties.forEach(p => renderProperty(p, container, today));
+}
+
+// ---- Crypto / unlock flow ----
+function b64ToBuf(b64){
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
+  return buf;
+}
+
+async function deriveKey(password, saltBuf, iterations){
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt: saltBuf, iterations, hash:'SHA-256'},
+    baseKey,
+    {name:'AES-GCM', length:256},
+    false,
+    ['decrypt']
+  );
+}
+
+async function tryUnlock(password){
+  const resp = await fetch('encrypted_data.json', {cache:'no-store'});
+  const bundle = await resp.json();
+  const salt = b64ToBuf(bundle.salt);
+  const iv = b64ToBuf(bundle.iv);
+  const ct = b64ToBuf(bundle.ciphertext);
+  const key = await deriveKey(password, salt, bundle.iterations);
+  const plainBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct);
+  const json = new TextDecoder().decode(plainBuf);
+  return JSON.parse(json);
+}
+
+function showApp(data){
+  document.getElementById('lock').style.display='none';
+  document.getElementById('app').style.display='block';
+  renderAll(data);
+}
+
+const STORAGE_KEY = 'immo_dashboard_cache_v1';
+
+async function unlockFlow(password){
+  const errEl = document.getElementById('err');
+  errEl.textContent = '';
+  try{
+    const data = await tryUnlock(password);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    showApp(data);
+  }catch(e){
+    errEl.textContent = 'Falsches Passwort oder Daten beschädigt.';
+  }
+}
+
+document.getElementById('unlockBtn').addEventListener('click', () => {
+  unlockFlow(document.getElementById('pw').value);
+});
+document.getElementById('pw').addEventListener('keydown', (e) => {
+  if(e.key==='Enter') unlockFlow(document.getElementById('pw').value);
+});
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+});
+
+// Try cached data first (avoids re-entering password every visit on same device)
+(function init(){
+  const cached = localStorage.getItem(STORAGE_KEY);
+  if(cached){
+    try{ showApp(JSON.parse(cached)); return; }catch(e){ /* fall through to lock screen */ }
+  }
+})();
+</script>
+</body>
+</html>
