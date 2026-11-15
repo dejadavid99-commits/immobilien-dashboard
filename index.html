@@ -47,8 +47,11 @@
   canvas{width:100%;height:280px;display:block;}
   .slider-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:0.85rem;}
   .slider-row input[type=range]{flex:1;}
+  .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
   table{width:100%;border-collapse:collapse;font-size:0.85rem;}
-  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
+  .table-wrap.wide table{min-width:480px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  td:first-child{white-space:normal;}
   th{color:var(--muted);font-weight:500;font-size:0.75rem;text-transform:uppercase;}
   td.num,th.num{text-align:right;}
   .forecastbox{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;}
@@ -59,6 +62,15 @@
   .tabs{display:flex;gap:8px;overflow-x:auto;margin-bottom:18px;padding-bottom:4px;}
   .tab{flex:0 0 auto;background:var(--panel);border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:20px;font-size:0.85rem;cursor:pointer;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;}
   .tab.active{background:var(--accent);color:#ffffff;border-color:var(--accent);font-weight:600;}
+  @media (max-width:480px){
+    #app{padding:14px 12px 50px;}
+    header.top{align-items:flex-start;}
+    header.top h1{font-size:1.1rem;}
+    .kpi{padding:12px;}
+    .kpi .value{font-size:1.15rem;}
+    canvas{height:220px;}
+    .panel{padding:14px;}
+  }
 </style>
 </head>
 <body>
@@ -325,16 +337,16 @@ function renderProperty(property, container, today){
       </div>
 
       <h2 style="margin-top:18px;">Darlehen</h2>
-      <table>
+      <div class="table-wrap wide"><table>
         <thead><tr><th>Darlehen</th><th class="num">Betrag</th><th class="num">Zins</th><th class="num">Rate/Monat</th><th>Zinsbindung bis</th></tr></thead>
         <tbody>
           ${property.loans.map(l=>`<tr><td>${l.label}</td><td class="num">${EUR(l.principal)}</td><td class="num">${l.interestRatePctPerYear.toFixed(3)}%</td><td class="num">${EUR2(l.monthlyPayment)}</td><td>${l.fixedUntil.split('-').reverse().join('.')}</td></tr>`).join('')}
           <tr style="font-weight:600;"><td>Summe</td><td class="num">${EUR(totalFinanced)}</td><td class="num">—</td><td class="num">${EUR2(bankrateMonat)}</td><td>—</td></tr>
         </tbody>
-      </table>
+      </table></div>
 
       <h2 style="margin-top:18px;">Miete &amp; laufende Kosten (monatlich)</h2>
-      <table>
+      <div class="table-wrap"><table>
         <tbody>
           <tr><td>Kaltmiete</td><td class="num">${EUR2(r.kaltmiete)}</td></tr>
           <tr><td>Hausverwaltung</td><td class="num">− ${EUR2(r.hausverwaltung)}</td></tr>
@@ -344,7 +356,7 @@ function renderProperty(property, container, today){
           <tr><td>Geschätzte Steuerersparnis</td><td class="num">+ ${EUR2(r.geschaetzteSteuerersparnisMonatlich)}</td></tr>
           <tr style="font-weight:600;"><td>Netto-Cashflow</td><td class="num">${EUR2(cashflowMonat)}</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </div>
   `;
   container.appendChild(el);
@@ -409,12 +421,12 @@ function renderOverview(data, timelines, container, today){
       </div>
 
       <h2 style="margin-top:18px;">Objekte im Überblick</h2>
-      <table>
+      <div class="table-wrap wide"><table>
         <thead><tr><th>Objekt</th><th class="num">Netto-Vermögen</th><th class="num">Cashflow/Monat</th><th class="num">Wert</th><th class="num">Restschuld</th></tr></thead>
         <tbody>
           ${rows.map(row=>`<tr><td>${row.property.name}</td><td class="num">${EUR(row.netto)}</td><td class="num">${EUR2(row.cashflowMonat)}</td><td class="num">${EUR(row.wert)}</td><td class="num">${EUR(row.restschuld)}</td></tr>`).join('')}
         </tbody>
-      </table>
+      </table></div>
     </div>
   `;
   container.appendChild(el);
