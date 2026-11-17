@@ -154,8 +154,11 @@ function buildTimeline(property, today){
 
 // Restschuld/Wert/Netto eines Objekts zu einem beliebigen absoluten Monat (vor Start = volle Finanzierung,
 // nach Zinsbindungsende = letzter bekannter Stand wird fortgeschrieben)
-function getStateAt(property, tl, absMonth){
-  if(absMonth < tl.startAbs){
+function getStateAt(property, tl, absMonth, exactDate){
+  // exactDate (optional {y,m,d}) gives a precise day-level pre-start check for "today" lookups;
+  // without it, absMonth<startAbs is month-grained, which is correct for generic calendar-series rows.
+  const beforeStart = exactDate ? dateLess(exactDate, tl.start) : (absMonth < tl.startAbs);
+  if(beforeStart){
     const restschuld = property.loans.reduce((s,l)=>s+l.principal,0);
     const wert = property.purchasePrice;
     return {restschuld, wert, netto: wert-restschuld};
@@ -284,7 +287,7 @@ function renderProperty(property, container, today){
   const notStartedYet = dateLess(today, tl.start);
 
   // current state
-  const curState = getStateAt(property, tl, monthIndexAbs(today.y, today.m));
+  const curState = getStateAt(property, tl, monthIndexAbs(today.y, today.m), today);
   const curRestschuld = curState.restschuld, curWert = curState.wert, curNetto = curState.netto;
   let curTilgungMonat, curZinsMonat;
   if(notStartedYet){
@@ -385,7 +388,7 @@ function renderOverview(data, timelines, container, today){
   const todayAbs = monthIndexAbs(today.y, today.m);
   let totalRestschuld=0, totalWert=0, totalTilgung=0, totalCashflow=0;
   const rows = timelines.map(({property, tl}) => {
-    const st = getStateAt(property, tl, todayAbs);
+    const st = getStateAt(property, tl, todayAbs, today);
     const r = property.rental;
     const bankrateMonat = property.loans.reduce((s,l)=>s+l.monthlyPayment,0);
     const cashflowMonat = r.kaltmiete - r.hausverwaltung - r.mietverwaltung - r.ruecklage - r.sonstigeKosten - bankrateMonat + r.geschaetzteSteuerersparnisMonatlich;
